@@ -1,0 +1,67 @@
+name: Build EMLII APK
+on:
+  workflow_dispatch:        # the "Run workflow" button
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git zip unzip autoconf automake libtool pkg-config \
+            zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev \
+            libssl-dev libltdl-dev build-essential
+
+      - name: Signing key (a fixed key keeps new versions installable over old ones)
+        run: |
+          mkdir -p ~/.android
+          if [ -f debug.keystore ]; then
+            cp debug.keystore ~/.android/debug.keystore
+          else
+            keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android \
+              -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+              -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            cp ~/.android/debug.keystore ./debug.keystore.generated
+          fi
+
+      - name: Cache Android SDK/NDK and build files
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            .buildozer
+          key: buildozer-${{ hashFiles('buildozer.spec') }}
+
+      - name: Install Buildozer
+        run: pip install --upgrade pip buildozer "cython<3" virtualenv
+
+      - name: Build the APK
+        run: buildozer -v android debug
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: EMLII-apk
+          path: bin/*.apk
+
+      - name: Upload the generated signing key (first run only — commit it as debug.keystore)
+        if: hashFiles('debug.keystore.generated') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-keystore
+          path: debug.keystore.generated
